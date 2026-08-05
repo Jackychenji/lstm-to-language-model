@@ -6,6 +6,7 @@ held-out text, and in a controlled context-length ablation.
 from __future__ import annotations
 
 import argparse
+import json
 import math
 from collections import Counter
 
@@ -115,6 +116,7 @@ def main(args):
         ("unigram, fitted on train", unigram_nll(train_ids, val_ids, V)),
         ("unigram, oracle (val entropy)", unigram_entropy(val_ids)),
         ("this LSTM LM", corpus_nll(model, val_ids, device,
+                                    seq_len=args.seq_len,
                                     max_windows=args.max_windows)),
     ]
 
@@ -123,9 +125,11 @@ def main(args):
     perm = torch.randperm(len(val_ids), generator=generator).numpy()
     rows.append(("this LSTM LM, shuffled text",
                  corpus_nll(model, val_ids[perm], device,
+                            seq_len=args.seq_len,
                             max_windows=args.max_windows)))
 
-    print(f"vocab size: {V}   held-out chars: {len(val_ids):,}\n")
+    print(f"vocab size: {V}   held-out chars: {len(val_ids):,}   "
+          f"context: {args.seq_len}\n")
     print(f"{'model':<32} {'nats/char':>10} {'bits/char':>10} {'ppl':>10}")
     print("-" * 64)
     for name, nats in rows:
@@ -152,12 +156,25 @@ def main(args):
           f"({bits_per_char(short_nats):.3f} bits, ppl {perplexity(short_nats):.2f})")
     print(f"  difference: {(short_nats - long_nats) / LN2:.3f} bits/char")
 
+    if args.save:
+        payload = {name: {"nats": n, "bits": bits_per_char(n),
+                          "ppl": perplexity(n)} for name, n in rows}
+        payload["parameters"] = model.num_parameters()
+        payload["context"] = args.seq_len
+        with open(args.save, "w", encoding="utf-8") as fw:
+            json.dump(payload, fw, ensure_ascii=False, indent=2)
+        print(f"\nwrote {args.save}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--ckpt", type=str, default="runs/best.pt")
+    parser.add_argument("--seq_len", type=int, default=256,
+                        help="evaluation context; use 128 to match the "
+                             "Transformer's maximum context")
     parser.add_argument("--max_windows", type=int, default=400)
     parser.add_argument("--short_ctx", type=int, default=128)
     parser.add_argument("--long_ctx", type=int, default=256)
     parser.add_argument("--ablation_windows", type=int, default=200)
+    parser.add_argument("--save", type=str, default=None)
     main(parser.parse_args())

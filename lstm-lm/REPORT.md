@@ -117,23 +117,38 @@ therefore split first and windows built independently from each half.
 
 ### 4.2 Comparison against baselines
 
-Measured on held-out text with `eval.py`, 256-character context:
+Measured with `eval.py` over the **entire** validation split at 128-character
+context, matching the training window:
 
 | | nats/char | bits/char | perplexity |
 |---|---|---|---|
 | uniform over vocabulary | 8.5082 | 12.275 | 4955.00 |
 | unigram, fitted on train (add-1 smoothed) | 6.6057 | 9.530 | 739.28 |
 | unigram, oracle (entropy of the val distribution) | 6.5106 | 9.393 | 672.25 |
-| **this model** | **4.1665** | **6.011** | **64.49** |
-| this model, on shuffled text | 8.3102 | 11.989 | 4065.07 |
+| **this model** | **4.2372** | **6.113** | **69.22** |
+| this model, on shuffled text | 8.3338 | 12.023 | 4162.38 |
 
 Two unigram rows are reported because they bound the baseline from both sides.
 The fitted row is what a unigram model actually achieves: probabilities
 estimated on the training split and applied to held-out text. The oracle row is
 the entropy of the validation distribution itself, which by Gibbs' inequality
 is the lowest cross-entropy *any* unigram model could reach on this text — so
-it is the stricter of the two. The model beats the fitted baseline by 3.52
-bits/char and the oracle baseline by 3.38 bits/char.
+it is the stricter of the two. The model beats the fitted baseline by 3.417
+bits/char and the oracle baseline by 3.280 bits/char.
+
+At 256-character context over the same full split the model reaches 4.2204
+nats/char (6.089 bits, perplexity 68.06).
+
+> **Correction.** An earlier version of this report gave 6.011 bits/char
+> (perplexity 64.49) here. That figure came from `eval.py`'s default
+> `--max_windows 400`, which truncates by *window count*: at 256-character
+> context it covered the first 102,400 characters of the 119,658-character
+> split, and at 128-character context only the first 51,200. Different context
+> settings were therefore scored on different — and, as it turned out,
+> unequally difficult — text. All numbers in this report now cover the whole
+> split. The corrected 128-character figure, 69.22, agrees exactly with the
+> validation perplexity `train.py` reported during training, which is the
+> consistency check the earlier number was failing.
 
 ### 4.3 Context-length ablation
 
@@ -145,13 +160,18 @@ weights, only the visible history differs.
 
 | visible history | nats/char | bits/char | perplexity |
 |---|---|---|---|
-| ≥ 128 characters | 4.0120 | 5.788 | 55.26 |
-| < 128 characters | 4.0460 | 5.837 | 57.17 |
+| ≥ 128 characters | 4.2184 | 6.086 | 67.92 |
+| < 128 characters | 4.2520 | 6.134 | 70.25 |
 
-The difference is **0.049 bits/char**, about 3% in perplexity, over 25,600
-target characters.
+The difference is **0.049 bits/char**, about 3% in perplexity, over the full
+split.
 
-### 4.3 Generated samples
+Worth noting: when this ablation was first run over a 400-window subset it also
+gave 0.049 bits/char, while the uncontrolled 128-vs-256 comparison moved from
+7% to 1.7% once coverage was fixed. The controlled measurement was stable
+against the coverage bug; the uncontrolled one was not.
+
+### 4.4 Generated samples
 
 Temperature 0.8, top-k 40. Corpus line breaks shown as ` / `.
 
@@ -191,27 +211,38 @@ rather than capacity-limited.
 
 **The model has learned sequence, not frequency.** This is the claim the
 unigram rows exist to test. A unigram model memorises which characters are
-common and nothing else; this model beats the fitted version by **3.52
+common and nothing else; this model beats the fitted version by **3.417
 bits/char**, and still beats the oracle version — the best any unigram model
-could do here — by **3.38 bits/char**. More decisively, shuffling the held-out
+could do here — by **3.280 bits/char**. More decisively, shuffling the held-out
 characters, an operation that preserves the unigram distribution exactly and
-destroys only ordering, costs the model **5.98 bits/char** and returns it
+destroys only ordering, costs the model **5.910 bits/char** and returns it
 almost to the uniform baseline. A model that had learned only character
 frequencies would score both texts identically.
 
 **Context beyond the training window helps, but only slightly.** The controlled
 ablation in §4.3 puts the benefit of ≥128 characters of history at **0.049
-bits/char** — real, but small. This is worth stating carefully, because the
-uncontrolled version of the comparison is misleading: evaluating the same text
-in 256-character windows rather than 128-character windows lowers perplexity
-from 69.2 to 64.5, about 7%, which looks like a much larger long-range effect.
-Most of that 7% is an artefact of which positions are being averaged. A
-128-character window has every position at short history, while a 256-character
-window has half its positions past 128 characters, so the two averages are
-taken over different mixes of context length rather than over the same
-predictions. Once the targets are held fixed, the effect shrinks to 0.049
-bits/char. The cell state does carry information past the training window, but
-the model is mostly operating on much shorter dependencies.
+bits/char** — real, but small. This claim went through two corrections, both
+worth recording.
+
+The first attempt compared perplexity at 128-character windows (69.2) against
+256-character windows (64.5) and read the ~7% gap as evidence of long-range
+dependency. That is confounded: a 128-character window has every position at
+short history, while a 256-character window has half its positions past 128
+characters, so the two averages are taken over different mixes of context
+length rather than over the same predictions.
+
+Fixing that by holding the targets fixed gave 0.049 bits/char. But the
+underlying 7% figure was *also* wrong for a second, unrelated reason — the
+evaluation was truncating by window count, so the two context settings were
+scored on different amounts of text (see the correction in §4.2). Over the full
+split the uncontrolled gap is 69.22 → 68.06, about 1.7%, not 7%.
+
+The controlled ablation returned 0.049 bits/char both before and after that
+coverage fix. That is the useful lesson: the measurement that held its targets
+fixed was insensitive to a serious bug elsewhere in the evaluation, while the
+uncontrolled one moved by a factor of four. The cell state does carry
+information past the training window, but the model is mostly operating on much
+shorter dependencies.
 
 **What the samples show it learned.** Orthography first — essentially every
 generated string is a legal character sequence. Then multi-character words and

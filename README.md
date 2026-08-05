@@ -1,21 +1,28 @@
-# Character-level LSTM language model (Chinese)
+# From a hand-written LSTM to language models
 
-A character-level language model trained from scratch on 5.98M characters of
-Chinese text. The LSTM recurrence is implemented by hand — `nn.LSTM` is not
-used anywhere.
+Two character-level language models trained from scratch on the same 5.98M
+characters of Chinese text, at matched parameter count and identical token
+budget, so the architectures can be compared rather than just described.
 
-It grew out of a coursework assignment. CS324 Deep Learning (SUSTech, Fall
-2024), Assignment 3 Part I required implementing an LSTM from scratch,
-explicitly without `torch.nn.LSTM`, deriving all four gates and unrolling the
-recurrence manually. That assignment trained the network on `PalindromeDataset`,
-a synthetic task: given the first T−1 digits of a digit palindrome, predict the
-T-th. **The coursework itself is not published here** — the assignment
-specification and my submission are available on request.
+| directory | model | parameters | held-out perplexity |
+|---|---|---|---|
+| [`lstm-lm/`](lstm-lm) | 2-layer LSTM, recurrence written by hand | 7,484,507 | 69.22 |
+| [`transformer-lm/`](transformer-lm) | 6-layer causal Transformer | 7,313,755 | **41.49** |
 
-## Why the extension exists
+Both are independent extensions completed in August 2026. Neither is graded
+coursework — see below.
 
-The assignment's objective (equation 9 of its specification) computes
-cross-entropy at the **final timestep only**:
+## Where this came from
+
+CS324 Deep Learning (SUSTech, Fall 2024), Assignment 3 Part I required
+implementing an LSTM from scratch, explicitly without `torch.nn.LSTM`, deriving
+all four gates and unrolling the recurrence manually. That assignment trained
+the network on `PalindromeDataset`: given the first T−1 digits of a digit
+palindrome, predict the T-th. **The coursework itself is not published here** —
+the assignment specification and my submission are available on request.
+
+Its objective (equation 9 of the specification) computes cross-entropy at the
+**final timestep only**:
 
 ```
 L = - sum_k  y_k log( y~_k^(T) )          <- note the superscript (T)
@@ -31,147 +38,85 @@ L = - (1/T) sum_t sum_k  y_k^(t) log( y~_k^(t) )
 ```
 
 One superscript is the entire boundary between the two. Crossing it is not a
-local edit: a target at every step means the data must be real text rather than
-synthetic labels, which means a vocabulary, which means an embedding table on
-the input side and an output projection applied at every timestep.
+local edit: a target at every step means real text rather than synthetic
+labels, which means a vocabulary, which means an embedding table and an output
+projection applied at every timestep. `lstm-lm/` is that crossing, keeping the
+assignment's recurrence intact. `transformer-lm/` then replaces the recurrence
+to see how much of the result was the objective and how much was the
+architecture.
 
-## What changed
+## LSTM vs. Causal Transformer
 
-| | assignment | this |
-|---|---|---|
-| Data | synthetic digit palindromes | 5.98M characters of Chinese text |
-| Vocabulary | 10 digits | 4,955 characters (min_freq 2, `<unk>` for the tail) |
-| Input | one-hot / raw scalar | learned embedding, 256-d |
-| Objective | cross-entropy at the **last** step | next-char cross-entropy at **every** step |
-| Depth | 1 layer | 2 layers + dropout |
-| Size | ~68K parameters | 7,484,507 parameters |
-| Optimiser | RMSProp, fixed LR | AdamW, cosine decay + warmup |
-| Metric | accuracy | perplexity / bits-per-char |
-| Output | a class label | autoregressive generation |
-
-The gate equations are unchanged:
+Held fixed across both runs: corpus, preprocessing, the 4,955-character
+vocabulary built from the training split, the contiguous 98/2 split, sequence
+length 128, effective batch 96, a budget of 5,000 × 96 × 128 = **61,440,000
+training tokens**, the evaluation script and held-out text, the sampling
+prompts, temperature 0.8, top-k 40, and seed 42.
 
 ```
-g_t = tanh   (W_gx x_t + W_gh h_{t-1})
-i_t = sigmoid(W_ix x_t + W_ih h_{t-1})
-f_t = sigmoid(W_fx x_t + W_fh h_{t-1})
-o_t = sigmoid(W_ox x_t + W_oh h_{t-1})
-c_t = g_t * i_t + c_{t-1} * f_t
-h_t = tanh(c_t) * o_t
+$ python compare_models.py
 ```
 
-The assignment's eight `nn.Linear` layers are fused into two (`Wx: input -> 4H`,
-`Wh: hidden -> 4H`, then `chunk(4)`) — mathematically identical, ~4x faster,
-which matters at 6M characters instead of a toy set.
+| model | parameters | train tokens | wall time | val bpc | val ppl |
+|---|---|---|---|---|---|
+| LSTM | 7,484,507 | 61,440,000 | 25m58s | 6.113 | 69.22 |
+| Transformer | 7,313,755 | 61,440,000 | **4m32s** | **5.375** | **41.49** |
 
-## Results
-
-5,000 steps, ~26 minutes on one RTX 5060 Laptop. Held-out perplexity **69.2**
-(6.11 bits/char).
-
-| | bits/char | perplexity |
+| baseline (identical for both) | bits/char | perplexity |
 |---|---|---|
 | uniform over vocabulary | 12.275 | 4955.00 |
 | unigram, fitted on train | 9.530 | 739.28 |
 | unigram, oracle (entropy of val) | 9.393 | 672.25 |
-| **this model** | **6.011** | **64.49** |
-| this model, on shuffled text | 11.989 | 4065.07 |
 
-Shuffling the held-out characters preserves the unigram distribution exactly
-and destroys only ordering; the model loses 5.98 bits/char and falls back near
-the uniform baseline, so essentially all of its advantage is sequential
-structure rather than memorised character frequencies.
+| shuffle control | shuffled bits/char | penalty | gain over unigram |
+|---|---|---|---|
+| LSTM | 12.023 | 5.910 | 3.417 |
+| Transformer | 12.908 | **7.533** | **4.155** |
 
-A controlled ablation on identical target characters puts the benefit of ≥128
-characters of visible history at 0.049 bits/char — real, but much smaller than
-an uncontrolled 128-vs-256-window comparison suggests.
+![comparison](comparison.png)
 
-Sample at step 5000 (temperature 0.8, top-k 40):
+**The Transformer wins on every axis measured**: 0.738 bits/char better, 40.1%
+lower perplexity, 5.7x faster wall clock, with 2.3% fewer parameters. It passes
+the LSTM's *final* validation loss at step 1,250 — a quarter of the budget.
+The wall-clock gap is structural: attention parallelises across the time
+dimension, while the LSTM must step through 128 timesteps in sequence.
 
-```
-据新华社伦敦１月１日电（记者黄建）在香港特区政府总理李岚清（附图片１张）
-```
+**The shuffle control is the more interesting result.** Shuffling the held-out
+characters preserves the unigram distribution exactly and destroys only
+ordering. It costs the Transformer 7.533 bits/char against the LSTM's 5.910 —
+and pushes the Transformer *past* the uniform baseline, to 12.908 bits against
+uniform's 12.275. On text whose ordering has been destroyed it is confidently
+wrong rather than merely uninformed, because it is placing probability mass
+according to sequential structure that is no longer there. Both models learned
+ordering; the Transformer built a sharper and more committed model of it.
 
-The news-wire dateline template is reproduced correctly; the office it names
-does not exist. Full write-up — structure, settings, curves, samples, baselines,
-ablation and analysis — in [`REPORT.md`](REPORT.md).
+**What this does not show.** One seed each, one configuration each, no
+hyperparameter sweep, no scaling curve. The learning rates differ (2e-3 for the
+LSTM, 6e-4 for the Transformer) because each is a conventional default for its
+architecture — so this compares two architectures at reasonable settings, not a
+single variable. And "sequence length 128" means direct attention to all
+earlier positions for one model and compression into a fixed-width cell state
+for the other; the number is shared, the mechanism is not, and that is exactly
+what is being measured. The direction of the result matches the published
+literature, so it is unsurprising rather than novel. What it is, is controlled
+on the axes that usually go uncontrolled.
 
-## Files
-
-| file | contents |
-|---|---|
-| `data.py` | corpus loading, character vocabulary, next-char windowing |
-| `model.py` | hand-written `LSTMLayer` + `CharLSTMLM`, sampling |
-| `train.py` | training loop, evaluation, checkpointing, loss curves |
-| `eval.py` | unigram baselines, shuffle control, context-length ablation |
-| `sample.py` | generation from a checkpoint |
-| `utils.py` | `AverageMeter` (carried over from the assignment), metrics, LR schedule |
-
-## Data
-
-The corpus is **not redistributed here**. The runs in `REPORT.md` used two
-word-segmented Chinese corpora (5,982,899 characters combined after
-preprocessing, 17.7 MB of UTF-8) that are not mine to publish.
-
-Any UTF-8 text works. `data.py` builds the vocabulary from whatever it is given
-and strips spaces by default, so word-segmented corpora and plain running text
-behave the same. `DEFAULT_CORPUS` in `train.py` points at local paths on the
-machine the runs were done on; pass `--corpus` instead of relying on it.
-
-## Setup
+## Reproducing
 
 ```bash
-pip install -r requirements.txt
-
-python train.py --corpus your_text.txt --max_steps 5000   # ~26 min on an RTX 5060
-python eval.py  --ckpt runs/best.pt
-python sample.py --prompt "中国经济" --n 300 --temperature 0.8 --top_k 40
+cd lstm-lm        && pip install -r requirements.txt && python train.py --corpus your_text.txt
+cd ../transformer-lm && python train.py --corpus your_text.txt
+cd .. && python compare_models.py
 ```
 
-A 100-step smoke run to check the pipeline end to end:
+Each directory's README covers its own setup, and its REPORT.md the full
+analysis. The corpus is not redistributed; `--corpus` accepts any UTF-8 text.
 
-```bash
-python train.py --corpus your_text.txt --max_steps 100 \
-    --eval_interval 50 --sample_interval 50 --out_dir runs_smoke
-```
+## Scope
 
-Step-0 training loss should print as `ln(vocab_size)` — 8.5081 against a
-theoretical 8.5082 for the 4,955-character vocabulary used here. If it does
-not, something upstream of the optimiser is wrong.
-
-Default architecture: 2 layers, hidden 512, embedding 256, dropout 0.2,
-sequence length 128, AdamW with cosine decay and 200 warmup steps, gradient
-clipping at 1.0, bf16 autocast.
-
-## Design choices worth noting
-
-- **Contiguous train/val split, not random.** Splitting *windows* at random
-  would put nearly every validation character inside some training window,
-  since windows are adjacent in the underlying text. The raw text is split
-  first and windows built independently from each half.
-- **Segmentation spaces stripped.** The source corpus is word-segmented. Left
-  in, the space would be ~30% of all tokens and the model would spend much of
-  its capacity predicting word boundaries.
-- **Forget-gate bias initialised to 1**, so the cell state is retained rather
-  than erased during the first few hundred updates.
-- **Two unigram baselines.** The fitted one is what a unigram model actually
-  achieves; the oracle one is the entropy of the validation distribution
-  itself, which by Gibbs' inequality lower-bounds any unigram model on this
-  text and is therefore the stricter comparison.
-- **Perplexity and bits-per-char, not accuracy.** Next-character accuracy is
-  close to meaningless for a language model — the correct next character is
-  genuinely ambiguous most of the time.
-
-## Limitations
-
-- An LSTM at 7.5M parameters on 5.98M characters: roughly four orders of
-  magnitude below a modern language model. Characters rather than a learned
-  subword tokenizer, no attention.
-- One training run, one seed. The context-length ablation is the only
-  controlled comparison; no hyperparameter sweep, no scaling curve.
-- Perplexity is not compared against any published benchmark, since the corpus
-  is not a standard one.
-
-It is an exercise in the mechanics of language-model training — the next-token
-objective, perplexity and bits-per-char, truncated BPTT, autoregressive
-sampling, and honest baselines — not a competitive model.
+These are 7.3–7.5M-parameter character-level models on 5.98M characters —
+roughly four orders of magnitude below a modern language model, with no learned
+subword tokenizer and no pretraining/finetuning split. They are an exercise in
+the mechanics of language-model training: the next-token objective, perplexity
+and bits-per-char, truncated BPTT, causal masking, autoregressive sampling, and
+baselines and controls that survive being checked.

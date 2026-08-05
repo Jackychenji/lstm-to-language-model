@@ -1,0 +1,29 @@
+{
+  "uniform over vocab": {
+    "nats": 8.508152446764088,
+    "bits": 12.27466934207385,
+    "ppl": 4954.999999999997
+  },
+  "unigram, fitted on train": {
+    "nats": 6.60568155823805,
+    "bits": 9.529984025761715,
+    "ppl": 739.2835623462652
+  },
+  "unigram, oracle (val entropy)": {
+    "nats": 6.510628567668424,
+    "bits": 9.39285154764525,
+    "ppl": 672.2488387022032
+  },
+  "this Transformer LM": {
+    "nats": 3.725474731314616,
+    "bits": 5.37472391982474,
+    "ppl": 41.4909251115922
+  },
+  "this Transformer LM, shuffled text": {
+    "nats": 8.947167598716197,
+    "bits": 12.908034324670274,
+    "ppl": 7686.090907405166
+  },
+  "parameters": 7313755,
+  "context": 128
+}
