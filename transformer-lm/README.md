@@ -38,13 +38,23 @@ generation recomputes over the trailing 128 characters.
 | this model, on shuffled text | 12.908 | 7686.09 |
 
 Against the LSTM at the same token budget: **0.738 bits/char better, 40.1%
-lower perplexity, 5.7x faster wall clock**, with 2.3% fewer parameters.
+lower perplexity**, with 2.3% fewer parameters, in 5.7x less wall clock.
+
+The speed figure needs a caveat the perplexity figure does not. The trained
+LSTM unrolls its recurrence in a Python loop while this model calls a fused
+attention kernel, so 5.7x mixes architecture with implementation.
+`../benchmark_speed.py` separates them using cuDNN's fused `nn.LSTM` as a
+timing reference: hand-written loop → fused LSTM is **6.20x**, fused LSTM →
+Transformer is **1.08x**. At this size a properly fused LSTM is within ~8% of
+the Transformer, so the wall-clock gap is overwhelmingly a kernel effect.
 
 The shuffle row is the more interesting one. Shuffling the held-out characters
 preserves the unigram distribution and destroys only ordering; it costs this
 model 7.533 bits/char against the LSTM's 5.910, and pushes it *past* the
 uniform baseline — confidently wrong rather than merely uninformed. Both models
 learned ordering; this one committed harder to it.
+
+Data provenance, hashes and preprocessing: [`../DATA.md`](../DATA.md).
 
 Full write-up, including what is and is not controlled in the comparison:
 [`REPORT.md`](REPORT.md). Side-by-side tables: `python compare_models.py` from

@@ -75,9 +75,8 @@ perturbed, and across 0–126 when position 127 is perturbed).
 ### 4.1 Training
 
 5,000 steps in **4m32s** on one RTX 5060 Laptop (8GB), against 25m58s for the
-LSTM on the same budget — a 5.7x wall-clock difference, which is the expected
-consequence of the Transformer parallelising across the time dimension while
-the LSTM must step through 128 timesteps sequentially.
+LSTM on the same budget — 5.7x. §5 shows that this gap is almost entirely an
+implementation effect rather than an architectural one.
 
 | step | train ppl | val ppl | val bits/char |
 |---|---|---|---|
@@ -127,11 +126,37 @@ Temperature 0.8, top-k 40, corpus line breaks shown as ` / `:
 
 ## 5. Analysis
 
-**The Transformer wins on every axis measured.** 0.738 bits/char better,
-40.1% lower perplexity, at 2.3% fewer parameters and 5.7x less wall-clock time
-on an identical token budget. The loss curves separate within the first 250
-steps and never re-cross; the Transformer passes the LSTM's *final* validation
-loss at step 1,250 — a quarter of the budget, and under a minute of wall clock.
+**The Transformer achieved better held-out perplexity and better wall-clock
+efficiency in this comparison.** 0.738 bits/char better, 40.1% lower
+perplexity, at 2.3% fewer parameters and 5.7x less wall-clock time on an
+identical token budget. The loss curves separate within the first 250 steps and
+never re-cross; the Transformer passes the LSTM's *final* validation loss at
+step 1,250 — a quarter of the budget, and under a minute of wall clock.
+
+**Almost none of the speed difference is architectural.** The trained LSTM
+unrolls 128 timesteps in a Python loop; the Transformer calls a fused attention
+kernel. Comparing only those two conflates "attention parallelises over time"
+with "one of these runs a fused CUDA kernel". `../benchmark_speed.py` adds
+cuDNN's fused `nn.LSTM` as a third timing reference — same shape, used only for
+timing, not for any trained model:
+
+| implementation | parameters | ms/step | relative |
+|---|---|---|---|
+| LSTM, hand-written Python loop (trained) | 7,484,507 | 283.9 | 1.00x |
+| LSTM, cuDNN fused `nn.LSTM` (reference) | 7,488,603 | 45.8 | 6.20x |
+| Transformer, fused SDPA (trained) | 7,313,755 | 42.3 | 6.72x |
+
+Batch 96 × sequence 128, bf16, 30 timed steps after 10 warmup, forward and
+backward including the optimiser step. Hand-written loop → fused LSTM is
+**6.20x**; fused LSTM → Transformer is **1.08x**. So at this size and sequence
+length a properly fused LSTM lands within about 8% of the Transformer, and the
+5.7x observed in training is overwhelmingly a kernel effect. The honest
+statement is that *this* LSTM implementation is slow, not that recurrence is
+inherently slow at 128 timesteps. The perplexity result is untouched by this.
+
+An earlier draft of this report attributed the wall-clock gap to attention
+parallelising across the time dimension. That was wrong, and the benchmark
+above is what showed it.
 
 **It relies more on order, not less.** The shuffle control is the more
 interesting result. Shuffling costs the Transformer 7.533 bits/char against the
@@ -152,13 +177,18 @@ unsurprising rather than novel — the value here is that the comparison is
 actually controlled on data, vocabulary, token budget and evaluation, which is
 where informal architecture comparisons usually go wrong.
 
-**Why the gap is plausibly this large at this scale.** Every position in the
-Transformer window reads earlier positions directly; the LSTM must route the
-same information through a fixed-width state updated 128 times. The controlled
-ablation on the LSTM (`../lstm-lm/REPORT.md` §4.3) found it gains only 0.049
-bits/char from history beyond 128 characters, which is consistent with a model
-that compresses aggressively. Attention removes that bottleneck within the
-window.
+**A mechanism worth proposing but not claiming.** Every position in the
+Transformer window reads earlier positions directly, while the LSTM must route
+the same information through a fixed-width state updated 128 times. That is a
+plausible account of the perplexity gap, but this experiment does not test it.
+
+In particular, the LSTM's context-length ablation (`../lstm-lm/REPORT.md` §4.3)
+found little additional gain beyond 128 characters — 0.049 bits/char. That is
+consistent with limited use of longer history, but it measures behaviour
+*outside* the 128-character window and therefore does not by itself explain a
+difference measured *inside* the shared window. Attributing the gap to the
+recurrent bottleneck would need a separate experiment: for example, per-position
+loss curves within the window for both models, or an attention-span analysis.
 
 ## 6. Limitations
 

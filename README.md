@@ -75,11 +75,30 @@ $ python compare_models.py
 
 ![comparison](comparison.png)
 
-**The Transformer wins on every axis measured**: 0.738 bits/char better, 40.1%
-lower perplexity, 5.7x faster wall clock, with 2.3% fewer parameters. It passes
-the LSTM's *final* validation loss at step 1,250 — a quarter of the budget.
-The wall-clock gap is structural: attention parallelises across the time
-dimension, while the LSTM must step through 128 timesteps in sequence.
+**The Transformer achieved better held-out perplexity and better wall-clock
+efficiency in this comparison**: 0.738 bits/char and 40.1% lower perplexity
+with 2.3% fewer parameters, and 5.7x less wall clock. It passes the LSTM's
+*final* validation loss at step 1,250 — a quarter of the budget.
+
+**But almost none of the speed difference is architectural.** The trained LSTM
+unrolls its recurrence in a Python loop while the Transformer calls a fused
+attention kernel, so the 5.7x conflates architecture with implementation.
+`benchmark_speed.py` separates them by adding cuDNN's fused `nn.LSTM` as a
+third timing reference — used only for timing; the trained model does not use
+it:
+
+| implementation | ms/step | relative |
+|---|---|---|
+| LSTM, hand-written Python loop (the trained model) | 283.9 | 1.00x |
+| LSTM, cuDNN fused `nn.LSTM` (reference only) | 45.8 | 6.20x |
+| Transformer, fused SDPA (the trained model) | 42.3 | 6.72x |
+
+Hand-written loop → fused LSTM is **6.2x**. Fused LSTM → Transformer is
+**1.08x**. At this size and a 128-character sequence, a properly fused LSTM is
+within about 8% of the Transformer; the wall-clock gap in the training runs is
+overwhelmingly a kernel and implementation effect, not evidence that attention
+is intrinsically faster here. The perplexity advantage is unaffected by any of
+this — that one is real.
 
 **The shuffle control is the more interesting result.** Shuffling the held-out
 characters preserves the unigram distribution exactly and destroys only
@@ -108,6 +127,8 @@ cd lstm-lm        && pip install -r requirements.txt && python train.py --corpus
 cd ../transformer-lm && python train.py --corpus your_text.txt
 cd .. && python compare_models.py
 ```
+
+Corpus provenance, SHA-256 hashes and preprocessing: [`DATA.md`](DATA.md).
 
 Each directory's README covers its own setup, and its REPORT.md the full
 analysis. The corpus is not redistributed; `--corpus` accepts any UTF-8 text.
