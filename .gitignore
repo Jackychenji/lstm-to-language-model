@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.idea/
+.vscode/
+
+# Model checkpoints are large; attach to a GitHub Release instead of committing.
+*.pt
+*.pth
+*.ckpt
+
+# Local corpora
+*.utf8
+data/
