@@ -4,8 +4,10 @@ A decoder-only Transformer trained under the same conditions as the LSTM in
 `../lstm-lm`, at matched parameter count and identical token budget, so that
 the two runs differ in architecture rather than in protocol.
 
-Both are August 2026 independent extensions. Neither was part of the graded
-CS324 coursework, which trained the LSTM on a synthetic digit-palindrome task.
+After the original assignment had been completed and graded, I independently
+extended the handwritten LSTM into a character-level language model; this
+Transformer is the follow-up comparison. Neither was part of the graded CS324
+coursework, which trained the LSTM on a synthetic digit-palindrome task.
 
 ---
 

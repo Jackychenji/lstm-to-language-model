@@ -9,8 +9,9 @@ budget, so the architectures can be compared rather than just described.
 | [`lstm-lm/`](lstm-lm) | 2-layer LSTM, recurrence written by hand | 7,484,507 | 69.22 |
 | [`transformer-lm/`](transformer-lm) | 6-layer causal Transformer | 7,313,755 | **41.49** |
 
-Both are independent extensions completed in August 2026. Neither is graded
-coursework — see below.
+After the original assignment had been completed and graded, I independently
+extended the handwritten LSTM into a character-level language model. Neither
+model here is graded coursework — see below.
 
 ## Where this came from
 

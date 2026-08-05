@@ -5,8 +5,10 @@ the hand-written LSTM in [`../lstm-lm`](../lstm-lm): same corpus, same
 vocabulary, same split, same 61,440,000-token budget, same evaluation, matched
 parameter count.
 
-Both are independent August 2026 extensions of a CS324 Deep Learning assignment.
-Neither is graded coursework.
+After the original CS324 assignment had been completed and graded, I
+independently extended the handwritten LSTM into a character-level language
+model; this Transformer is the follow-up comparison. Neither is graded
+coursework.
 
 ## Architecture
 
