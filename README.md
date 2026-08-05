@@ -75,30 +75,39 @@ $ python compare_models.py
 
 ![comparison](comparison.png)
 
-**The Transformer achieved better held-out perplexity and better wall-clock
-efficiency in this comparison**: 0.738 bits/char and 40.1% lower perplexity
-with 2.3% fewer parameters, and 5.7x less wall clock. It passes the LSTM's
-*final* validation loss at step 1,250 — a quarter of the budget.
+**The Transformer reached 0.738 bits/char lower held-out loss and 40.1% lower
+perplexity, with 2.3% fewer parameters.** It passes the LSTM's *final*
+validation loss at step 1,250 — a quarter of the budget. Its training run was
+also 5.7x faster in wall clock, but a separate fused-kernel benchmark shows
+most of that gap comes from implementation rather than architecture: the
+hand-written LSTM steps through a Python recurrence loop, while the Transformer
+calls a fused attention kernel. **Perplexity, not training time, is the
+meaningful architecture result here.**
 
-**But almost none of the speed difference is architectural.** The trained LSTM
-unrolls its recurrence in a Python loop while the Transformer calls a fused
-attention kernel, so the 5.7x conflates architecture with implementation.
-`benchmark_speed.py` separates them by adding cuDNN's fused `nn.LSTM` as a
-third timing reference — used only for timing; the trained model does not use
-it:
+`benchmark_speed.py` shows why, by adding cuDNN's fused `nn.LSTM` as a third
+timing reference — used only for timing; neither trained model uses it. Rounds
+are interleaved rather than grouped, because sustained load throttles a laptop
+GPU and grouping would charge whichever model ran first for everyone else's
+heat.
 
-| implementation | ms/step | relative |
+| implementation | ms/step | median ratio |
 |---|---|---|
-| LSTM, hand-written Python loop (the trained model) | 283.9 | 1.00x |
-| LSTM, cuDNN fused `nn.LSTM` (reference only) | 45.8 | 6.20x |
-| Transformer, fused SDPA (the trained model) | 42.3 | 6.72x |
+| LSTM, hand-written Python loop (the trained model) | 316.3 ± 35.4 | 1.00x |
+| LSTM, cuDNN fused `nn.LSTM` (reference only) | 53.4 ± 8.4 | 5.92x |
+| Transformer, fused SDPA (the trained model) | 52.5 ± 14.5 | 6.02x |
 
-Hand-written loop → fused LSTM is **6.2x**. Fused LSTM → Transformer is
-**1.08x**. At this size and a 128-character sequence, a properly fused LSTM is
-within about 8% of the Transformer; the wall-clock gap in the training runs is
-overwhelmingly a kernel and implementation effect, not evidence that attention
-is intrinsically faster here. The perplexity advantage is unaffected by any of
-this — that one is real.
+Within-round medians over 5 rounds: hand-written loop → fused `nn.LSTM` is
+**5.99x** (5.54–6.22), and fused `nn.LSTM` → Transformer is **1.01x**
+(0.88–1.07) — a range straddling 1.0, meaning the two fused implementations are
+not measurably different in speed at this size. This benchmark suggests that
+most of the observed wall-clock gap in these implementations comes from kernel
+and implementation differences rather than from architecture alone. It is not a
+clean architecture measurement either way: `nn.LSTM` and SDPA are two different
+optimised kernels with different operator mixes and different amounts of vendor
+tuning.
+
+None of this touches the perplexity result, which is what the comparison was
+built to measure.
 
 **The shuffle control is the more interesting result.** Shuffling the held-out
 characters preserves the unigram distribution exactly and destroys only

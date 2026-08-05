@@ -133,26 +133,43 @@ identical token budget. The loss curves separate within the first 250 steps and
 never re-cross; the Transformer passes the LSTM's *final* validation loss at
 step 1,250 — a quarter of the budget, and under a minute of wall clock.
 
-**Almost none of the speed difference is architectural.** The trained LSTM
-unrolls 128 timesteps in a Python loop; the Transformer calls a fused attention
-kernel. Comparing only those two conflates "attention parallelises over time"
-with "one of these runs a fused CUDA kernel". `../benchmark_speed.py` adds
-cuDNN's fused `nn.LSTM` as a third timing reference — same shape, used only for
-timing, not for any trained model:
+**Most of the speed difference is implementation, not architecture.** The
+trained LSTM unrolls 128 timesteps in a Python loop; the Transformer calls a
+fused attention kernel. Comparing only those two conflates "attention
+parallelises over time" with "one of these runs a fused CUDA kernel".
+`../benchmark_speed.py` adds cuDNN's fused `nn.LSTM` as a third timing
+reference — same shape, used only for timing, not for any trained model:
 
-| implementation | parameters | ms/step | relative |
+| implementation | parameters | ms/step | median ratio |
 |---|---|---|---|
-| LSTM, hand-written Python loop (trained) | 7,484,507 | 283.9 | 1.00x |
-| LSTM, cuDNN fused `nn.LSTM` (reference) | 7,488,603 | 45.8 | 6.20x |
-| Transformer, fused SDPA (trained) | 7,313,755 | 42.3 | 6.72x |
+| LSTM, hand-written Python loop (trained) | 7,484,507 | 316.3 ± 35.4 | 1.00x |
+| LSTM, cuDNN fused `nn.LSTM` (reference) | 7,488,603 | 53.4 ± 8.4 | 5.92x |
+| Transformer, fused SDPA (trained) | 7,313,755 | 52.5 ± 14.5 | 6.02x |
 
 Batch 96 × sequence 128, bf16, 30 timed steps after 10 warmup, forward and
-backward including the optimiser step. Hand-written loop → fused LSTM is
-**6.20x**; fused LSTM → Transformer is **1.08x**. So at this size and sequence
-length a properly fused LSTM lands within about 8% of the Transformer, and the
-5.7x observed in training is overwhelmingly a kernel effect. The honest
-statement is that *this* LSTM implementation is slow, not that recurrence is
-inherently slow at 128 timesteps. The perplexity result is untouched by this.
+backward including the optimiser step, 5 rounds. Rounds are interleaved rather
+than grouped: a laptop GPU throttles under sustained load, and grouping all
+repeats of one model together charges whichever ran first for everyone else's
+heat. An earlier grouped version of this benchmark produced a ±226 ms spread on
+the hand-written model and ratio ranges spanning 4.6–12.8x, which is how the
+problem surfaced.
+
+Ratios taken within each round: hand-written loop → fused `nn.LSTM` is **5.99x**
+(range 5.54–6.22); fused `nn.LSTM` → Transformer is **1.01x** (range
+0.88–1.07). That range straddles 1.0 — in some rounds the Transformer was
+slower — so the two fused implementations are not measurably different in speed
+at this size.
+
+This benchmark suggests that most of the observed wall-clock gap in these
+implementations comes from kernel and implementation differences rather than
+from architecture alone. It does not isolate architecture: `nn.LSTM` and SDPA
+are two different optimised kernels, with different operator mixes and
+different amounts of vendor tuning, so the second ratio is a comparison of two
+fused implementations rather than a controlled measurement. The defensible
+statement is that *this* LSTM implementation is slow because of its Python
+recurrence, not that recurrence is inherently slow at 128 timesteps.
+
+The perplexity result is untouched by any of this.
 
 An earlier draft of this report attributed the wall-clock gap to attention
 parallelising across the time dimension. That was wrong, and the benchmark

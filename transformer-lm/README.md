@@ -38,15 +38,17 @@ generation recomputes over the trailing 128 characters.
 | this model, on shuffled text | 12.908 | 7686.09 |
 
 Against the LSTM at the same token budget: **0.738 bits/char better, 40.1%
-lower perplexity**, with 2.3% fewer parameters, in 5.7x less wall clock.
+lower perplexity**, with 2.3% fewer parameters. The training run was also 5.7x
+faster, but that figure needs a caveat the perplexity figure does not.
 
-The speed figure needs a caveat the perplexity figure does not. The trained
-LSTM unrolls its recurrence in a Python loop while this model calls a fused
-attention kernel, so 5.7x mixes architecture with implementation.
-`../benchmark_speed.py` separates them using cuDNN's fused `nn.LSTM` as a
-timing reference: hand-written loop → fused LSTM is **6.20x**, fused LSTM →
-Transformer is **1.08x**. At this size a properly fused LSTM is within ~8% of
-the Transformer, so the wall-clock gap is overwhelmingly a kernel effect.
+The trained LSTM unrolls its recurrence in a Python loop while this model calls
+a fused attention kernel, so 5.7x mixes architecture with implementation.
+`../benchmark_speed.py` adds cuDNN's fused `nn.LSTM` as a timing reference:
+hand-written loop → fused `nn.LSTM` is **5.99x** (5.54–6.22), while fused
+`nn.LSTM` → Transformer is **1.01x** (0.88–1.07), a range straddling 1.0. Most
+of the observed gap comes from kernel and implementation differences rather
+than from architecture alone. **Perplexity, not training time, is the
+meaningful architecture result.**
 
 The shuffle row is the more interesting one. Shuffling the held-out characters
 preserves the unigram distribution and destroys only ordering; it costs this
